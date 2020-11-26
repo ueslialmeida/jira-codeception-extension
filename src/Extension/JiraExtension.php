@@ -1,4 +1,10 @@
-use \Codeception\Events;
+<?php
+
+namespace Codeception\Extension;
+
+use Codeception\Events;
+use Codeception\Exception\ExtensionException;
+use Codeception\Extension;
 
 class JiraExtension extends \Codeception\Extension
 {
