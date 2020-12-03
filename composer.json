@@ -1,25 +1,24 @@
 {
-    "name": "ueslialmeida/jira-codeception-extension",
-    "description": "This package provides an extension for Codeception to create Jira issues automatically when a test fails.",
-    "keywords": [
-      "jira",
-      "issue",
-      "codeception",
-      "extension"
-    ],
-    "authors": [
-      {
-        "name": "Uesli Almeida",
-        "email": "almeida.uesli@gmail.com",
-        "homepage": "https://github.com/ueslialmeida",
-        "role": "Tester/Developer"
-      }
-    ],
-    "autoload": {
-      "psr-4": {
-        "Codeception\\": "src"
-      }
-    },
-    "require": {}
-  }
-  
+  "name": "ueslialmeida/simple-jira-codeception",
+  "description": "This package provides an extension for Codeception to create Jira issues automatically when a test fails.",
+  "keywords": [
+    "jira",
+    "issue",
+    "codeception",
+    "extension"
+  ],
+  "authors": [
+    {
+      "name": "Uesli Almeida",
+      "email": "almeida.uesli@gmail.com",
+      "homepage": "https://github.com/ueslialmeida",
+      "role": "Tester/Developer"
+    }
+  ],
+  "autoload": {
+    "psr-4": {
+      "Codeception\\": "src"
+    }
+  },
+  "require": {}
+}
