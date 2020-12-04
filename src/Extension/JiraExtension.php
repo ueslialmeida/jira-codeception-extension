@@ -41,9 +41,13 @@ class JiraExtension extends \Codeception\Extension
     protected $debug;
 
     /**
-     * Jira issue properties.
+     * Issue fields.
      */
     private $failedStep;
+    private $testName;
+    private $failureMessage;
+    private $fileName;
+    private $stackTrace;
 
     // list events to listen to
     // Codeception\Events constants used to set the event
@@ -79,13 +83,13 @@ class JiraExtension extends \Codeception\Extension
         $this->projectKey = $this->config['projectKey'];
 
         if (!isset($this->config['issueType']) or empty($this->config['issueType'])) {
-            throw new ExtensionException($this, "Configuration for 'issue type' is missing.");
+            throw new ExtensionException($this, "Configuration for 'issue type' is missing. Recommended using 'Bug'.");
         }
 
         $this->issueType = $this->config['issueType'];
 
         if (!isset($this->config['debugMode'])) {
-            throw new ExtensionException($this, "Configuration for 'debug mode' is missing. Possible values are true or false");
+            throw new ExtensionException($this, "Configuration for 'debug mode' is missing. Possible values are 'true' or 'false'.");
         }
 
         $this->debug = $this->config['debugMode'];
@@ -107,54 +111,57 @@ class JiraExtension extends \Codeception\Extension
      */
     public function testFailed(\Codeception\Event\FailEvent $e) {
         if (!$this->debug) {
-            $trace = $e->getFail()->getTraceAsString();
-            $message = $e->getFail()->getMessage();
-            $fileName = $e->getTest()->getMetadata()->getFilename();
-            $testName = $e->getTest()->getMetadata()->getName();
+            $this->stackTrace = $e->getFail()->getTraceAsString();
+            $this->failureMessage = $e->getFail()->getMessage();
+            $this->fileName = $e->getTest()->getMetadata()->getFilename();
+            $this->testName = $e->getTest()->getMetadata()->getName();
 
-            $this->createIssue($trace, $message, $fileName, $testName);
+            $this->createIssue();
         }
         else {
-            echo "Debug mode is active, no Jira issue will be created.\n\n";
+            echo("Debug mode is active, no issue will be created in Jira.\n\n");
         }
     }
 
-    private function createIssue($trace, $message, $fileName, $testName) {
-        echo("CREATING JIRA ISSUE\n");
-
-        $cleanFileName = $this->removeFilePath($fileName);
+    private function createIssue() {
+        echo("Creating issue in Jira...\n");
 
         $jiraAPI = $this->host . '/rest/api/2/issue';
 
-        $issue = json_encode([
-            'fields' => [
-            'project' => ['key' => "$this->projectKey"],
-            'summary' => $cleanFileName . ' : ' . $testName,
-            'description' => "
-            Test Name: $testName \n
-            Failed Message: $message \n
-            Failed Step: I $this->failedStep \n
-            File Name: $fileName \n
-            Stack Trace:\n $trace",
-            'issuetype' => ['name' => $this->issueType],
-            'assignee' => ['name' => 'uesli@zoocha.com'],
-            ]
-        ]);
+        $issue = json_encode($this->getIssueData());
 
-        $curl = curl_init();
-        curl_setopt($curl, CURLOPT_URL, $jiraAPI);
-        curl_setopt($curl, CURLOPT_RETURNTRANSFER, 1);
-        curl_setopt($curl, CURLOPT_FOLLOWLOCATION, 1);
-        curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, 0);
-        curl_setopt($curl, CURLOPT_SSL_VERIFYHOST, 0);
-        curl_setopt($curl, CURLOPT_HTTPHEADER, [
+        $request = curl_init();
+        curl_setopt($request, CURLOPT_URL, $jiraAPI);
+        curl_setopt($request, CURLOPT_RETURNTRANSFER, 1);
+        curl_setopt($request, CURLOPT_FOLLOWLOCATION, 1);
+        curl_setopt($request, CURLOPT_SSL_VERIFYPEER, 0);
+        curl_setopt($request, CURLOPT_SSL_VERIFYHOST, 0);
+        curl_setopt($request, CURLOPT_HTTPHEADER, [
             'Authorization: Basic ' . base64_encode($this->user . ':' . $this->token),
             'Content-Type: application/json',
         ]);
-        curl_setopt($curl, CURLOPT_POSTFIELDS, $issue);
+        curl_setopt($request, CURLOPT_POSTFIELDS, $issue);
 
-        $response = curl_exec($curl);
-        echo "Jira response: $response \n\n";
+        $response = curl_exec($request);
+        echo("Jira response: $response \n\n");
+    }
+
+    private function getIssueData() {
+        $cleanFileName = $this->removeFilePath($this->fileName);
+
+        return [
+            'fields' => [
+            'project' => ['key' => "$this->projectKey"],
+            'summary' => $cleanFileName . ' : ' . $this->testName,
+            'description' => "
+            Test Name: $this->testName \n
+            Failure Message: $this->failureMessage \n
+            Failed Step: I $this->failedStep \n
+            File Name: $this->fileName \n
+            Stack Trace:\n $this->stackTrace",
+            'issuetype' => ['name' => $this->issueType],
+            ]
+        ];
     }
 
     private function removeFilePath($filePath) {
