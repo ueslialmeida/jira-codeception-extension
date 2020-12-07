@@ -4,40 +4,171 @@ namespace Codeception\Extension;
 
 use Codeception\Events;
 use Codeception\Exception\ExtensionException;
-use Codeception\Extension;
 
+/**
+ * @author Uesli Almeida
+ * 
+ * This extension creates a Jira issue after a test failure.
+ *
+ * To use this extension a valid Jira configuration is required.
+ *
+ * Configuration 'codeception.yml' example:
+ *
+ *      extensions:
+ *        enabled:
+ *          - Codeception\Extension\JiraExtension
+ *        config:
+ *          Codeception\Extension\JiraExtension:
+ *           host: https://yourdomain.atlassian.net
+ *           user: email@mail.com
+ *           token: Tg7womaGGFpn9EC16qD3L7T6
+ *           projectKey: JE
+ *           issueType: Bug
+ *           debugMode: false
+ */
 class JiraExtension extends \Codeception\Extension
 {
+    const STRING_LIMIT = 1000;
+
+    /**
+     * Configuration properties.
+     */
+    protected $host;
+    protected $user;
+    protected $token;
+    protected $projectKey;
+    protected $issueType;
+    protected $debug;
+
+    /**
+     * Issue fields.
+     */
+    private $failedStep;
+    private $testName;
+    private $failureMessage;
+    private $fileName;
+    private $stackTrace;
+
     // list events to listen to
     // Codeception\Events constants used to set the event
-
     public static $events = array(
-        Events::SUITE_AFTER  => 'afterSuite',
-        Events::TEST_BEFORE => 'beforeTest',
-        Events::STEP_BEFORE => 'beforeStep',
+        Events::STEP_AFTER => 'afterStep',
         Events::TEST_FAIL => 'testFailed',
-        Events::RESULT_PRINT_AFTER => 'print',
     );
 
-    // methods that handle events
+    public function _initialize()
+    {
+        if (!isset($this->config['host']) or empty($this->config['host'])) {
+            throw new ExtensionException($this, "Configuration for 'host' is missing.");
+        }
 
-    public function afterSuite(\Codeception\Event\SuiteEvent $e) {
-        echo('### THIS IS THE AFTER SUITE EVENT ###');
+        $this->host = $this->config['host'];
+
+        if (!isset($this->config['user']) or empty($this->config['user'])) {
+            throw new ExtensionException($this, "Configuration for 'user' is missing.");
+        }
+        
+        $this->user = $this->config['user'];
+
+        if (!isset($this->config['token']) or empty($this->config['token'])) {
+            throw new ExtensionException($this, "Configuration for 'token' is missing.");
+        }
+
+        $this->token = $this->config['token'];
+
+        if (!isset($this->config['projectKey']) or empty($this->config['projectKey'])) {
+            throw new ExtensionException($this, "Configuration for 'project key' is missing.");
+        }
+
+        $this->projectKey = $this->config['projectKey'];
+
+        if (!isset($this->config['issueType']) or empty($this->config['issueType'])) {
+            throw new ExtensionException($this, "Configuration for 'issue type' is missing. Recommended using 'Bug'.");
+        }
+
+        $this->issueType = $this->config['issueType'];
+
+        if (!isset($this->config['debugMode'])) {
+            throw new ExtensionException($this, "Configuration for 'debug mode' is missing. Possible values are 'true' or 'false'.");
+        }
+
+        $this->debug = $this->config['debugMode'];
     }
 
-    public function beforeTest(\Codeception\Event\TestEvent $e) {
-        echo('@@@ THIS IS THE BEFORE TEST EVENT @@@');
+    /**
+     * This method is fired when the event 'step.after' occurs.
+     * @param \Codeception\Event\StepEvent $e
+     */
+    public function afterStep(\Codeception\Event\StepEvent $e) {
+        if ($e->getStep()->hasFailed()) {
+            $this->failedStep = $e->getStep()->toString(self::STRING_LIMIT);
+        }
     }
 
-    public function beforeStep(\Codeception\Event\StepEvent $e) {
-        echo('%%% THIS IS THE BEFORE STEP EVENT %%%');
-    }
-
+    /**
+     * This method is fired when the event 'test.fail' occurs.
+     * @param \Codeception\Event\FailEvent $e
+     */
     public function testFailed(\Codeception\Event\FailEvent $e) {
-        echo('$$$ THIS IS THE TEST FAILED EVENT $$$');
+        if (!$this->debug) {
+            $this->stackTrace = $e->getFail()->getTraceAsString();
+            $this->failureMessage = $e->getFail()->getMessage();
+            $this->fileName = $e->getTest()->getMetadata()->getFilename();
+            $this->testName = $e->getTest()->getMetadata()->getName();
+
+            $this->createIssue();
+        }
+        else {
+            echo("Debug mode is active, no issue will be created in Jira.\n\n");
+        }
     }
 
-    public function print(\Codeception\Event\PrintResultEvent $e) {
-        echo('&&& THIS IS THE RESULT PRINT AFTER EVENT &&&');
+    private function createIssue() {
+        echo("Creating issue in Jira...\n");
+
+        $jiraAPI = $this->host . '/rest/api/2/issue';
+
+        $issue = json_encode($this->getIssueData());
+
+        $request = curl_init();
+        curl_setopt($request, CURLOPT_URL, $jiraAPI);
+        curl_setopt($request, CURLOPT_RETURNTRANSFER, 1);
+        curl_setopt($request, CURLOPT_FOLLOWLOCATION, 1);
+        curl_setopt($request, CURLOPT_SSL_VERIFYPEER, 0);
+        curl_setopt($request, CURLOPT_SSL_VERIFYHOST, 0);
+        curl_setopt($request, CURLOPT_HTTPHEADER, [
+            'Authorization: Basic ' . base64_encode($this->user . ':' . $this->token),
+            'Content-Type: application/json',
+        ]);
+        curl_setopt($request, CURLOPT_POSTFIELDS, $issue);
+
+        $response = curl_exec($request);
+        echo("Jira response: $response \n\n");
+    }
+
+    private function getIssueData() {
+        $cleanFileName = $this->removeFilePath($this->fileName);
+
+        return [
+            'fields' => [
+            'project' => ['key' => "$this->projectKey"],
+            'summary' => $cleanFileName . ' : ' . $this->testName,
+            'description' => "
+            Test Name: $this->testName \n
+            Failure Message: $this->failureMessage \n
+            Failed Step: I $this->failedStep \n
+            File Name: $this->fileName \n
+            Stack Trace:\n $this->stackTrace",
+            'issuetype' => ['name' => $this->issueType],
+            ]
+        ];
+    }
+
+    private function removeFilePath($filePath) {
+        $pattern = "/[a-zA-Z\d]+\.[php]+/";
+        $path = explode('/', $filePath);
+        $fileName = implode(preg_grep($pattern, $path));
+        
+        return $fileName;
     }
 }
